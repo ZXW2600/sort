@@ -153,8 +153,9 @@ class KalmanBoxTracker(object):
         """
         return convert_x_to_bbox(self.kf.x)
 
-    def get_predict(self, t):
-        return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0],
+    def get_predict(self, t=0):
+      print(t)
+      return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0],
                                            [0, 1, 0, 0, 0, t, 0],
                                            [0, 0, 1, 0, 0, 0, t],
                                            [0, 0, 0, 1, 0, 0, 0],
@@ -219,7 +220,7 @@ class Sort(object):
         self.trackers = []
         self.frame_count = 0
 
-    def update(self, dets=np.empty((0, 5)),t=1):
+    def update(self, dets=np.empty((0, 5)),predic_t=1):
         """
         Params:
           dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
@@ -255,7 +256,7 @@ class Sort(object):
         i = len(self.trackers)
 
         for trk in reversed(self.trackers):
-            d = trk.get_predict(t)[0]
+            d = trk.get_predict(predic_t)[0]
             if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
                 # +1 as MOT benchmark requires positive
                 ret.append(np.concatenate((d, [trk.id+1])).reshape(1, -1))
@@ -312,6 +313,9 @@ if __name__ == '__main__':
         mot_tracker = Sort(max_age=args.max_age,
                            min_hits=args.min_hits,
                            iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
+        mot_tracker_old = Sort(max_age=args.max_age,
+                           min_hits=args.min_hits,
+                           iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
         seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
         seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
 
@@ -326,13 +330,15 @@ if __name__ == '__main__':
 
                 if(display):
                     fn = os.path.join('mot_benchmark', phase,
-                                      seq, 'img1', '%06d.jpg' % (frame))
+                                      seq, 'img1', 'image_%08d_0.png' % (frame+100+5))
                     im = io.imread(fn)
                     ax1.imshow(im)
                     plt.title(seq + ' Tracked Targets')
 
                 start_time = time.time()
                 trackers = mot_tracker.update(dets,5)
+                trackers_old = mot_tracker_old.update(dets,0)
+
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
 
@@ -342,7 +348,15 @@ if __name__ == '__main__':
                     if(display):
                         d = d.astype(np.int32)
                         ax1.add_patch(patches.Rectangle(
-                            (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[d[4] % 32, :]))
+                            (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[12, :]))
+
+                for d in trackers_old:
+                    print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
+                                                                    d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]), file=out_file)
+                    if(display):
+                        d = d.astype(np.int32)
+                        ax1.add_patch(patches.Rectangle(
+                            (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=2, ec=colours[20, :]))
 
                 if(display):
                     fig.canvas.flush_events()
