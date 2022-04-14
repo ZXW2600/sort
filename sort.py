@@ -16,6 +16,9 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 from __future__ import print_function
+import csv
+import fnmatch
+from math import nan
 from filterpy.kalman import KalmanFilter
 import argparse
 import time
@@ -103,25 +106,30 @@ class KalmanBoxTracker(object):
         """
         # define constant velocity model
         self.kf = KalmanFilter(dim_x=9, dim_z=4)
-        self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0, 0.5, 0],
-                              [0, 1, 0, 0, 0, 1, 0, 0, 0.5],
+        self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0, 0, 0],
+                              [0, 1, 0, 0, 0, 1, 0, 0, 0],
                               [0, 0, 1, 0, 0, 0, 1, 0, 0],
                               [0, 0, 0, 1, 0, 0, 0, 0, 0],
                               [0, 0, 0, 0, 1, 0, 0, 0, 0],
-                              [0, 0, 0, 0, 0, 1, 0, 1, 0],
-                              [0, 0, 0, 0, 0, 0, 1, 0, 1],
-                              [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                              [0, 0, 0, 0, 0, 0, 0, 0, 1]])
+                              [0, 0, 0, 0, 0, 1, 0, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 1, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 0, 0]])
         self.kf.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0],
                               [0, 1, 0, 0, 0, 0, 0, 0, 0],
                               [0, 0, 1, 0, 0, 0, 0, 0, 0],
                               [0, 0, 0, 1, 0, 0, 0, 0, 0]])
 
         self.kf.R[2:, 2:] *= 10.
+        self.kf.R[7:, 7:] *= 0.0001
+
         self.kf.P[4:, 4:] *= 1000.  # give high uncertainty to the unobservable initial velocities
+        self.kf.P[7:, 7:] *= 100000.  # give high uncertainty to the unobservable initial velocities
+
         self.kf.P *= 10.
-        self.kf.Q[-1, -1] *= 0.01
-        self.kf.Q[4:, 4:] *= 0.01
+        self.kf.Q[-1, -1] *= 10
+        self.kf.Q[4:, 4:] *= 10
+        self.kf.Q[7:, 7:] *= 0.0001
 
         self.kf.x[:4] = convert_bbox_to_z(bbox)
         self.time_since_update = 0
@@ -163,15 +171,15 @@ class KalmanBoxTracker(object):
         return convert_x_to_bbox(self.kf.x)
 
     def get_predict(self, t=0):
-        return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0, 0.5*t*t, 0],
-                                           [0, 1, 0, 0, 0, t, 0, 0, 0.5*t*t],
+        return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0, 0, 0],
+                                           [0, 1, 0, 0, 0, t, 0, 0, 0],
                                            [0, 0, 1, 0, 0, 0, 0, 0, 0],
                                            [0, 0, 0, 1, 0, 0, 0, 0, 0],
                                            [0, 0, 0, 0, 1, 0, 0, 0, 0],
-                                           [0, 0, 0, 0, 0, 1, 0, t, 0],
-                                           [0, 0, 0, 0, 0, 0, 1, 0, t],
-                                           [0, 0, 0, 0, 0, 0, 0, 1, 0],
-                                           [0, 0, 0, 0, 0, 0, 0, 0, 1]]).dot(self.kf.x))
+                                           [0, 0, 0, 0, 0, 1, 0, 0, 0],
+                                           [0, 0, 0, 0, 0, 0, 1, 0, 0],
+                                           [0, 0, 0, 0, 0, 0, 0, 0, 0],
+                                           [0, 0, 0, 0, 0, 0, 0, 0, 0]]).dot(self.kf.x))
 
 
 def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
@@ -279,15 +287,22 @@ class Sort(object):
         return np.empty((0, 5))
 
 
+def find(pattern, path):
+    result = []
+    for root, dirs, files in os.walk(path):
+        for name in files:
+            if fnmatch.fnmatch(name, pattern):
+                result.append(os.path.join(root, name))
+    return result
+
+
 def parse_args():
     """Parse input arguments."""
     parser = argparse.ArgumentParser(description='SORT demo')
     parser.add_argument('--display', dest='display',
                         help='Display online tracker output (slow) [False]', action='store_true')
     parser.add_argument(
-        "--seq_path", help="Path to detections.", type=str, default='data')
-    parser.add_argument(
-        "--phase", help="Subdirectory in seq_path.", type=str, default='train')
+        "--dets", help="yolo v5 detections save file.", type=str, default='data')
     parser.add_argument("--max_age",
                         help="Maximum number of frames to keep alive a track without associated detections.",
                         type=int, default=1)
@@ -304,13 +319,13 @@ if __name__ == '__main__':
     # all train
     args = parse_args()
     display = args.display
-    phase = args.phase
+    detections = args.dets
     total_time = 0.0
     total_frames = 0
     colours = np.random.rand(32, 3)  # used only for display
     if(display):
-        if not os.path.exists('mot_benchmark'):
-            print('\n\tERROR: mot_benchmark link not found!\n\n    Create a symbolic link to the MOT benchmark\n    (https://motchallenge.net/data/2D_MOT_2015/#download). E.g.:\n\n    $ ln -s /path/to/MOT2015_challenge/2DMOT2015 mot_benchmark\n\n')
+        if not os.path.exists(args.dets):
+            print('\n\tERROR: detection result link not found!\n\n    Create a symbolic link to the YOLO v5 result \n\n')
             exit()
         plt.ion()
         fig = plt.figure()
@@ -318,60 +333,108 @@ if __name__ == '__main__':
 
     if not os.path.exists('output'):
         os.makedirs('output')
-    pattern = os.path.join(args.seq_path, phase, '*', 'det', 'det.txt')
-    for seq_dets_fn in glob.glob(pattern):
+
+    videos = find('*.mp4', detections)
+    print("find videos in directory:"+str(videos))
+
+    for video in videos:
+        frame_id = 1
+        print("process video: " + video)
+
+        label_n_path = os.path.join(detections, 'labels', os.path.splitext(
+            os.path.basename(video))[0]+"_%d.txt")
+        image_n_path = os.path.join(detections, 'output', os.path.splitext(
+            os.path.basename(video))[0]+"_frame_%d.png")
+
+        im = io.imread(image_n_path % (1))
+        img_w = im.shape[1]
+        img_h = im.shape[0]
+        print("image path: "+image_n_path)
+        print("label path: "+label_n_path)
+
         mot_tracker = Sort(max_age=args.max_age,
                            min_hits=args.min_hits,
                            iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
-        mot_tracker_old = Sort(max_age=args.max_age,
-                               min_hits=args.min_hits,
-                               iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
-        seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
-        seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
+        csv_file=open("./output.csv","w")
+        csv_writer=csv.writer(csv_file)
+        csv_writer.writerow(["id",'x_raw','y_raw','x_mod','y_mod'])
+        while True:
+            if os.path.exists(image_n_path % (frame_id)):
+                dets = []
 
-        with open(os.path.join('output', '%s.txt' % (seq)), 'w') as out_file:
-            print("Processing %s." % (seq))
-            for frame in range(int(seq_dets[:, 0].max())):
-                frame += 1  # detection and frame numbers begin at 1
-                dets = seq_dets[seq_dets[:, 0] == frame, 2:7]
-                # convert to [x1,y1,w,h] to [x1,y1,x2,y2]
-                dets[:, 2:4] += dets[:, 0:2]
-                total_frames += 1
+                try:
+                    dets = np.loadtxt(label_n_path % frame_id, delimiter=' ')
+                except:
+                    pass
+
+                # print(label_n_path % frame_id)
 
                 if(display):
-                    fn = os.path.join('mot_benchmark', phase,
-                                      seq, 'img1', 'image_%08d_0.png' % (frame+100+1))
-                    im = io.imread(fn)
+                    im = io.imread(image_n_path% frame_id)
                     ax1.imshow(im)
-                    plt.title(seq + ' Tracked Targets')
+                    plt.title(str(frame_id) + ' Tracked Targets')
+
+                frame_id = frame_id+1
+                print("Processing %d." % (frame_id))
+
+                dets_xyxy = np.empty((0, 4))
+                csv_row=[frame_id]
+                if len(dets):
+                    if(dets.ndim == 1):
+                        dets_xyxy = dets[1:5].reshape(1, 4)
+                    else:
+                        dets_xyxy = dets[:, 1:5]
+                #     dets_xyxy=dets
+
+                    dets_xyxy[:, 0] *= img_w
+                    dets_xyxy[:, 1] *= img_h
+                    csv_row.append(dets_xyxy[0,0])
+                    csv_row.append(dets_xyxy[0,1])
+                    dets_xyxy[:, 2] *= img_w*0.5
+                    dets_xyxy[:, 3] *= img_h*0.5
+                    wh=dets_xyxy[:,2:4].copy()
+                    dets_xyxy[:,2:4]+= dets_xyxy[:,0:2]
+                    dets_xyxy[:,0:2]-= wh
+
+                else:
+                    csv_row.append(nan)
+                    csv_row.append(nan)
+                    # print(dets_xyxy)
+
+                # continue
+
+ 
 
                 start_time = time.time()
-                trackers = mot_tracker.update(dets, 1)
-                trackers_old = mot_tracker_old.update(dets, 0)
+                trackers = mot_tracker.update(dets_xyxy, 3)
 
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
+                if len(trackers):
+                    csv_row.append(0.5*(trackers[0][0]+trackers[0][2]))
+                    csv_row.append(0.5*(trackers[0][1]+trackers[0][3]))
+                else:
+                    csv_row.append(nan)
+                    csv_row.append(nan)
+                
+                csv_writer.writerow(csv_row)
 
                 for d in trackers:
-                    print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
-                                                                    d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]), file=out_file)
+                    # print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame_id,
+                                                                    # d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]))
                     if(display):
                         d = d.astype(np.int32)
                         ax1.add_patch(patches.Rectangle(
                             (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=3, ec=colours[12, :]))
 
-                for d in trackers_old:
-                    print('%d,%d,%.2f,%.2f,%.2f,%.2f,1,-1,-1,-1' % (frame,
-                                                                    d[4], d[0], d[1], d[2]-d[0], d[3]-d[1]), file=out_file)
-                    if(display):
-                        d = d.astype(np.int32)
-                        ax1.add_patch(patches.Rectangle(
-                            (d[0], d[1]), d[2]-d[0], d[3]-d[1], fill=False, lw=2, ec=colours[20, :]))
 
                 if(display):
                     fig.canvas.flush_events()
                     plt.draw()
                     ax1.cla()
+
+            else:
+                break
 
     print("Total Tracking took: %.3f seconds for %d frames or %.1f FPS" %
           (total_time, total_frames, total_frames / (total_time+0.001)))
