@@ -102,11 +102,20 @@ class KalmanBoxTracker(object):
         Initialises a tracker using initial bounding box.
         """
         # define constant velocity model
-        self.kf = KalmanFilter(dim_x=7, dim_z=4)
-        self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0], [0, 1, 0, 0, 0, 1, 0], [0, 0, 1, 0, 0, 0, 1], [
-                             0, 0, 0, 1, 0, 0, 0],  [0, 0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 1, 0], [0, 0, 0, 0, 0, 0, 1]])
-        self.kf.H = np.array([[1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0], [
-                             0, 0, 1, 0, 0, 0, 0], [0, 0, 0, 1, 0, 0, 0]])
+        self.kf = KalmanFilter(dim_x=9, dim_z=4)
+        self.kf.F = np.array([[1, 0, 0, 0, 1, 0, 0, 0.5, 0],
+                              [0, 1, 0, 0, 0, 1, 0, 0, 0.5],
+                              [0, 0, 1, 0, 0, 0, 1, 0, 0],
+                              [0, 0, 0, 1, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 1, 0, 0, 0, 0],
+                              [0, 0, 0, 0, 0, 1, 0, 1, 0],
+                              [0, 0, 0, 0, 0, 0, 1, 0, 1],
+                              [0, 0, 0, 0, 0, 0, 0, 1, 0],
+                              [0, 0, 0, 0, 0, 0, 0, 0, 1]])
+        self.kf.H = np.array([[1, 0, 0, 0, 0, 0, 0, 0, 0],
+                              [0, 1, 0, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 1, 0, 0, 0, 0, 0, 0],
+                              [0, 0, 0, 1, 0, 0, 0, 0, 0]])
 
         self.kf.R[2:, 2:] *= 10.
         self.kf.P[4:, 4:] *= 1000.  # give high uncertainty to the unobservable initial velocities
@@ -154,14 +163,15 @@ class KalmanBoxTracker(object):
         return convert_x_to_bbox(self.kf.x)
 
     def get_predict(self, t=0):
-      print(t)
-      return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0],
-                                           [0, 1, 0, 0, 0, t, 0],
-                                           [0, 0, 1, 0, 0, 0, t],
-                                           [0, 0, 0, 1, 0, 0, 0],
-                                           [0, 0, 0, 0, 1, 0, 0],
-                                           [0, 0, 0, 0, 0, 1, 0],
-                                           [0, 0, 0, 0, 0, 0, 1]]).dot(self.kf.x))
+        return convert_x_to_bbox(np.array([[1, 0, 0, 0, t, 0, 0, 0.5*t*t, 0],
+                                           [0, 1, 0, 0, 0, t, 0, 0, 0.5*t*t],
+                                           [0, 0, 1, 0, 0, 0, 0, 0, 0],
+                                           [0, 0, 0, 1, 0, 0, 0, 0, 0],
+                                           [0, 0, 0, 0, 1, 0, 0, 0, 0],
+                                           [0, 0, 0, 0, 0, 1, 0, t, 0],
+                                           [0, 0, 0, 0, 0, 0, 1, 0, t],
+                                           [0, 0, 0, 0, 0, 0, 0, 1, 0],
+                                           [0, 0, 0, 0, 0, 0, 0, 0, 1]]).dot(self.kf.x))
 
 
 def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
@@ -220,7 +230,7 @@ class Sort(object):
         self.trackers = []
         self.frame_count = 0
 
-    def update(self, dets=np.empty((0, 5)),predic_t=1):
+    def update(self, dets=np.empty((0, 5)), predic_t=1):
         """
         Params:
           dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
@@ -314,8 +324,8 @@ if __name__ == '__main__':
                            min_hits=args.min_hits,
                            iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
         mot_tracker_old = Sort(max_age=args.max_age,
-                           min_hits=args.min_hits,
-                           iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
+                               min_hits=args.min_hits,
+                               iou_threshold=args.iou_threshold)  # create instance of the SORT tracker
         seq_dets = np.loadtxt(seq_dets_fn, delimiter=',')
         seq = seq_dets_fn[pattern.find('*'):].split(os.path.sep)[0]
 
@@ -330,14 +340,14 @@ if __name__ == '__main__':
 
                 if(display):
                     fn = os.path.join('mot_benchmark', phase,
-                                      seq, 'img1', 'image_%08d_0.png' % (frame+100+5))
+                                      seq, 'img1', 'image_%08d_0.png' % (frame+100+1))
                     im = io.imread(fn)
                     ax1.imshow(im)
                     plt.title(seq + ' Tracked Targets')
 
                 start_time = time.time()
-                trackers = mot_tracker.update(dets,5)
-                trackers_old = mot_tracker_old.update(dets,0)
+                trackers = mot_tracker.update(dets, 1)
+                trackers_old = mot_tracker_old.update(dets, 0)
 
                 cycle_time = time.time() - start_time
                 total_time += cycle_time
